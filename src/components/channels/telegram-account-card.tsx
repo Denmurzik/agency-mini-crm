@@ -25,7 +25,18 @@ export type AccountView = {
 
 type Step = "phone" | "code" | "password";
 
-export function TelegramAccountCard({ account, loadFailed, locked }: { account: AccountView | null; loadFailed: boolean; locked: boolean }) {
+export function TelegramAccountCard({
+  account,
+  loadFailed,
+  locked,
+  business,
+}: {
+  account: AccountView | null;
+  loadFailed: boolean;
+  locked: boolean;
+  /** Серверный блок «Telegram Business» — основной способ подключения, показываем над userbot. */
+  business: React.ReactNode;
+}) {
   const connected = account?.status === "connected";
 
   return (
@@ -36,17 +47,24 @@ export function TelegramAccountCard({ account, loadFailed, locked }: { account: 
           Личный Telegram
         </CardTitle>
         <CardDescription>
-          В CRM попадают входящие личные сообщения от людей, которых нет в контактах аккаунта. Группы, боты и контакты игнорируются. Лучше подключать рабочий или второй аккаунт.
+          В CRM попадают входящие личные сообщения от людей, которых нет в контактах. Группы, боты и контакты игнорируются.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {loadFailed ? (
-          <StatusPill tone="error">Не удалось прочитать состояние аккаунта</StatusPill>
-        ) : (
-          <AccountStatus account={account} />
-        )}
-        {connected ? <Disconnect locked={locked} /> : <ConnectFlow reconnect={!!account} locked={locked} />}
-        {locked && <p className="text-xs text-muted-foreground">{CHANNELS_LOCKED_MESSAGE}.</p>}
+      <CardContent className="grid gap-4 lg:grid-cols-2">
+        {business}
+        <section className="flex flex-col gap-3 rounded-lg border p-4">
+          <div>
+            <h3 className="text-sm font-medium">Userbot</h3>
+            <p className="text-xs text-muted-foreground">Для аккаунтов без Premium. Требуются api_id и api_hash с my.telegram.org; неофициальный клиент, лучше подключать рабочий или второй аккаунт.</p>
+          </div>
+          {loadFailed ? (
+            <StatusPill tone="error">Не удалось прочитать состояние аккаунта</StatusPill>
+          ) : (
+            <AccountStatus account={account} />
+          )}
+          {connected ? <Disconnect locked={locked} /> : <ConnectFlow reconnect={!!account} locked={locked} />}
+          {locked && <p className="text-xs text-muted-foreground">{CHANNELS_LOCKED_MESSAGE}.</p>}
+        </section>
       </CardContent>
     </Card>
   );

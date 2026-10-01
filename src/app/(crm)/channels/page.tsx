@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { count, desc, sql } from "drizzle-orm";
 import { AutoRefresh } from "@/components/channels/auto-refresh";
+import { BusinessSection, toBusinessView } from "@/components/channels/business-section";
 import { BotCard } from "@/components/channels/bot-card";
 import { NotifyCard } from "@/components/channels/notify-card";
 import { TelegramAccountCard, type AccountView } from "@/components/channels/telegram-account-card";
 import { formatRelative, maskPhone } from "@/components/leads/format";
 import { getBotInfo, type BotInfo } from "@/lib/bot/info";
+import { getBusinessStatus } from "@/lib/bot/business";
 import { getDb } from "@/lib/db";
 import { notifySubscribers, tgAccounts } from "@/lib/db/schema";
 import { getNotifySubscribeUrl } from "@/lib/notify-token";
@@ -39,10 +41,11 @@ async function loadAccount(): Promise<AccountView | null> {
 export default async function ChannelsPage() {
   // Статусы каналов живые: страница не должна пререндериться на этапе сборки.
   await connection();
-  const [botResult, accountResult, subscribersResult] = await Promise.allSettled([
+  const [botResult, accountResult, subscribersResult, businessResult] = await Promise.allSettled([
     getBotInfo(),
     loadAccount(),
     getDb().select({ n: count() }).from(notifySubscribers),
+    getBusinessStatus(getDb()),
   ]);
 
   let notifyUrl: string | null = null;
@@ -53,6 +56,7 @@ export default async function ChannelsPage() {
   }
 
   const bot: BotInfo | null | "error" = botResult.status === "fulfilled" ? botResult.value : "error";
+  const botUsername = (bot !== null && bot !== "error" ? bot.username : "") || process.env.TELEGRAM_BOT_USERNAME || null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -65,7 +69,16 @@ export default async function ChannelsPage() {
         <BotCard bot={bot} />
         <NotifyCard url={notifyUrl} subscribers={subscribersResult.status === "fulfilled" ? (subscribersResult.value[0]?.n ?? 0) : null} />
         <div className="lg:col-span-2">
-          <TelegramAccountCard locked={process.env.CHANNELS_LOCKED === "1"} account={accountResult.status === "fulfilled" ? accountResult.value : null} loadFailed={accountResult.status === "rejected"} />
+          <TelegramAccountCard
+            business={
+              <BusinessSection
+                business={toBusinessView(businessResult.status === "fulfilled" ? businessResult.value : null)}
+                botUsername={botUsername}
+                loadFailed={businessResult.status === "rejected"}
+              />
+            }
+            locked={process.env.CHANNELS_LOCKED === "1"}
+            account={accountResult.status === "fulfilled" ? accountResult.value : null} loadFailed={accountResult.status === "rejected"} />
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import type { Update, UserFromGetMe } from "grammy/types";
 import { getDb, type Db } from "@/lib/db";
 import { botSessions, notifySubscribers } from "@/lib/db/schema";
 import { ingestLead, type IngestOptions } from "@/lib/leads/ingest";
+import { ingestBusinessMessage, saveBusinessConnection } from "./business";
 import {
   IDLE,
   step,
@@ -176,6 +177,11 @@ export function createBot({ token, db, botInfo, ingestOptions }: CreateBotOption
     );
     return submittedReplies(lead.id);
   }
+
+  // Telegram Business: только запись в БД, никаких ответов (они ушли бы от имени владельца аккаунта).
+  // Регистрируем до диалоговых обработчиков и не зовём next().
+  bot.on("business_connection", (ctx) => saveBusinessConnection(db, ctx.businessConnection));
+  bot.on("business_message", (ctx) => ingestBusinessMessage(db, ctx.businessMessage, ctx.api, ingestOptions));
 
   // Бот работает только в личке.
   bot.use(async (ctx, next) => {
