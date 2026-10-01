@@ -1,4 +1,5 @@
-// ЗАГЛУШКА: сигнатура — Контракт 6, реализацию пишет поток `core`.
+import { getBotApi } from "./api";
+
 export type BotInfo = {
   username: string;
   link: string;
@@ -7,6 +8,30 @@ export type BotInfo = {
   lastError: string | null;
 };
 
+/** Состояние бота для страницы «Каналы». `null` — бот не настроен (нет токена). */
 export async function getBotInfo(): Promise<BotInfo | null> {
-  throw new Error("getBotInfo: not implemented");
+  const api = getBotApi();
+  if (!api) return null;
+
+  let username = process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, "") ?? "";
+  try {
+    const [webhook, me] = await Promise.all([api.getWebhookInfo(), username ? null : api.getMe()]);
+    if (me) username = me.username ?? "";
+    return {
+      username,
+      link: `https://t.me/${username}`,
+      webhookUrl: webhook.url || null,
+      pendingUpdates: webhook.pending_update_count,
+      lastError: webhook.last_error_message ?? null,
+    };
+  } catch (err) {
+    // Telegram недоступен или токен неверный — страница должна показать причину, а не упасть.
+    return {
+      username,
+      link: `https://t.me/${username}`,
+      webhookUrl: null,
+      pendingUpdates: 0,
+      lastError: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
