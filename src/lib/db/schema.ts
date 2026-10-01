@@ -113,10 +113,24 @@ export const tgAccounts = pgTable("tg_accounts", {
   createdAt: createdAt(),
 });
 
+// Подключения Telegram Business: владелец аккаунта привязал бота в «Настройки → Telegram для бизнеса → Чат-боты»,
+// и Telegram пересылает боту личные сообщения этого аккаунта (официальная альтернатива userbot).
+export const tgBusinessConnections = pgTable("tg_business_connections", {
+  id: text("id").primaryKey(), // business_connection_id
+  ownerTgUserId: bigint("owner_tg_user_id", { mode: "number" }).notNull(),
+  ownerUsername: text("owner_username"),
+  ownerName: text("owner_name"),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type Lead = typeof leads.$inferSelect;
 export type NewLead = typeof leads.$inferInsert;
 export type Tag = typeof tags.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type TgAccount = typeof tgAccounts.$inferSelect;
+export type TgBusinessConnection = typeof tgBusinessConnections.$inferSelect;
 export type LeadSource = (typeof leadSource.enumValues)[number];
 export type LeadStatus = (typeof leadStatus.enumValues)[number];
