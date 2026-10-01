@@ -89,7 +89,16 @@ export async function getBotInfo(): Promise<BotInfo | null>;  // null — бот
 
 ## Переменные окружения
 
-См. `.env.example`. CRM (Vercel): `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`, `CRM_PASSWORD`, `AUTH_SECRET`, `INGEST_SECRET`, `WORKER_URL`, `WORKER_SECRET`, `APP_URL`. Воркер (Railway): `DATABASE_URL`, `TG_API_ID`, `TG_API_HASH`, `SESSION_ENC_KEY`, `INGEST_URL`, `INGEST_SECRET`, `WORKER_SECRET`, `PORT`.
+См. `.env.example`. CRM (Vercel): `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`, `CRM_PASSWORD`, `AUTH_SECRET`, `INGEST_SECRET`, `WORKER_URL`, `WORKER_SECRET`, `APP_URL`, `CHANNELS_LOCKED`. Воркер (Railway): `DATABASE_URL`, `TG_API_ID`, `TG_API_HASH`, `SESSION_ENC_KEY`, `INGEST_URL`, `INGEST_SECRET`, `WORKER_SECRET`, `PORT`.
+
+## Решения по ревью плана (Codex)
+
+- Webhook отвечает 500, если обработка упала до коммита в БД (Telegram повторит), и 200, если упала только отправка ответа. Повтор того же апдейта отсекается по `bot_sessions.last_update_id`.
+- `ingestLead`: дубль `externalId` откатывает всю транзакцию; уведомление — после коммита.
+- Воркер: догонялка непрочитанных при старте (GramJS `catchUp()` не реализован), `auth.LogOut` при отключении, один слот аккаунта.
+- `CHANNELS_LOCKED=1` на проде: проверяющие видят форму подключения, но не могут отключить демо-аккаунт.
+- Деплой только на production-домен Vercel (preview закрыты Deployment Protection — webhook туда не достучится).
+- Оставлено как есть: лиды только от людей не из контактов (продуктовое решение), токен подписки многоразовый (ссылка доступна только за паролем CRM).
 
 ## Порядок
 

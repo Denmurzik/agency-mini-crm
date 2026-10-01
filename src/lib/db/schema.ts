@@ -90,6 +90,8 @@ export const botSessions = pgTable("bot_sessions", {
   chatId: bigint("chat_id", { mode: "number" }).primaryKey(),
   step: text("step").notNull(),
   data: jsonb("data").notNull().default({}),
+  // update_id последнего обработанного апдейта: Telegram ретраит webhook, повтор не должен двигать диалог.
+  lastUpdateId: bigint("last_update_id", { mode: "number" }).notNull().default(0),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

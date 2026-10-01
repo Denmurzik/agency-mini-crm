@@ -17,8 +17,9 @@ export function getDb(): Db {
   if (!cached) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
-    // prepare: false — совместимо с пулером Neon (pgbouncer); max: 1 — одна serverless-функция = одно соединение.
-    const client = postgres(url, { prepare: false, max: 1 });
+    // prepare: false — совместимо с пулером Neon (pgbouncer). Короткие таймауты: webhook Telegram
+    // не должен висеть дольше своего лимита из-за «уснувшей» БД; простаивающее соединение закрываем сами.
+    const client = postgres(url, { prepare: false, max: 3, connect_timeout: 8, idle_timeout: 20 });
     cached = drizzle(client, { schema });
   }
   return cached as unknown as Db;

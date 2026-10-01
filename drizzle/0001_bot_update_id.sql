@@ -1,0 +1,1 @@
+ALTER TABLE "bot_sessions" ADD COLUMN "last_update_id" bigint DEFAULT 0 NOT NULL;
