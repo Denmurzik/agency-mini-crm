@@ -9,7 +9,7 @@ const TONES = {
 
 export function StatusPill({ tone, children }: { tone: keyof typeof TONES; children: React.ReactNode }) {
   return (
-    <span className={cn("inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-xs font-medium", TONES[tone])}>
+    <span className={cn("inline-flex h-5 w-fit items-center gap-1.5 rounded-full px-2 text-xs font-medium", TONES[tone])}>
       <span className="size-1.5 rounded-full bg-current" />
       {children}
     </span>
