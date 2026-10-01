@@ -4,13 +4,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import type { BotInfo } from "@/lib/bot/info";
 import { StatusPill } from "./status-pill";
 
-function webhookStatus(bot: BotInfo) {
+const ERROR_FRESH_MS = 15 * 60_000;
+
+/** Telegram не сбрасывает last_error после восстановления: ошибка актуальна, если свежая или копятся необработанные апдейты. */
+function hasActiveError(bot: BotInfo): boolean {
+  if (!bot.lastError) return false;
+  const fresh = !!bot.lastErrorDate && Date.now() - new Date(bot.lastErrorDate).getTime() < ERROR_FRESH_MS;
+  return fresh || bot.pendingUpdates > 0;
+}
+
+function webhookStatus(bot: BotInfo, failing: boolean) {
   if (!bot.webhookUrl) return <StatusPill tone="warn">Webhook не настроен</StatusPill>;
-  if (bot.lastError) return <StatusPill tone="error">Webhook: ошибка</StatusPill>;
+  if (failing) return <StatusPill tone="error">Webhook: ошибка</StatusPill>;
   return <StatusPill tone="ok">Webhook работает</StatusPill>;
 }
 
 export function BotCard({ bot }: { bot: BotInfo | null | "error" }) {
+  const failing = bot !== null && bot !== "error" && hasActiveError(bot);
   return (
     <Card>
       <CardHeader>
@@ -45,9 +55,9 @@ export function BotCard({ bot }: { bot: BotInfo | null | "error" }) {
               ) : (
                 <StatusPill tone="warn">Имя бота неизвестно</StatusPill>
               )}
-              {webhookStatus(bot)}
+              {webhookStatus(bot, failing)}
             </div>
-            {bot.lastError && <p className="rounded-lg bg-destructive/10 p-2.5 text-sm break-words text-destructive">{bot.lastError}</p>}
+            {failing && bot.lastError && <p className="rounded-lg bg-destructive/10 p-2.5 text-sm break-words text-destructive">{bot.lastError}</p>}
             {bot.webhookUrl && <p className="text-xs text-muted-foreground">В очереди обновлений: {bot.pendingUpdates}</p>}
           </>
         )}

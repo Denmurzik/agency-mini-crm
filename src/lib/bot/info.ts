@@ -6,6 +6,8 @@ export type BotInfo = {
   webhookUrl: string | null;
   pendingUpdates: number;
   lastError: string | null;
+  /** Когда случилась `lastError` (ISO). Telegram не сбрасывает ошибку после восстановления — смотрите на давность. */
+  lastErrorDate: string | null;
 };
 
 /** Состояние бота для страницы «Каналы». `null` — бот не настроен (нет токена). */
@@ -23,6 +25,7 @@ export async function getBotInfo(): Promise<BotInfo | null> {
       webhookUrl: webhook.url || null,
       pendingUpdates: webhook.pending_update_count,
       lastError: webhook.last_error_message ?? null,
+      lastErrorDate: webhook.last_error_date ? new Date(webhook.last_error_date * 1000).toISOString() : null,
     };
   } catch (err) {
     // Telegram недоступен или токен неверный — страница должна показать причину, а не упасть.
@@ -32,6 +35,7 @@ export async function getBotInfo(): Promise<BotInfo | null> {
       webhookUrl: null,
       pendingUpdates: 0,
       lastError: err instanceof Error ? err.message : String(err),
+      lastErrorDate: new Date().toISOString(),
     };
   }
 }

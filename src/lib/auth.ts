@@ -71,9 +71,18 @@ export async function clearSessionCookie(): Promise<void> {
   (await cookies()).delete(SESSION_COOKIE);
 }
 
-/** Куда вернуть после входа: только внутренние пути, иначе это open redirect. */
+/**
+ * Куда вернуть после входа: только пути своего сайта, иначе это open redirect.
+ * Разбираем тем же парсером, что и браузер: он вырезает табы и переводы строк, поэтому «/», таб, «/evil.com»
+ * для него — `//evil.com`, и проверка по префиксу строки такое пропустит.
+ */
 export function safeNextPath(next: unknown): string {
-  if (typeof next !== "string" || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
-  if (next.startsWith("/login")) return "/";
-  return next;
+  if (typeof next !== "string") return "/";
+  try {
+    const url = new URL(next, "http://x");
+    if (url.origin !== "http://x" || url.pathname.startsWith("/login")) return "/";
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return "/";
+  }
 }

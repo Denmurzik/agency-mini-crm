@@ -19,6 +19,11 @@ describe("loadConfig", () => {
     expect(c.sessionEncKey).toHaveLength(32);
   });
 
+  it("START_DELAY_MS по умолчанию 20 секунд, можно задать 0", () => {
+    expect(loadConfig(valid).startDelayMs).toBe(20_000);
+    expect(loadConfig({ ...valid, START_DELAY_MS: "0" }).startDelayMs).toBe(0);
+  });
+
   it("PORT из env", () => {
     expect(loadConfig({ ...valid, PORT: "3000" }).port).toBe(3000);
   });

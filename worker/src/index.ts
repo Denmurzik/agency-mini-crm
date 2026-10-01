@@ -27,7 +27,10 @@ const server = createHttpServer({ service: manager, secret: config.workerSecret,
 // HTTP поднимаем первым: /health должен отвечать, даже пока Telegram подключается.
 server.listen(config.port, () => logger.info("HTTP API воркера запущен", { port: config.port }));
 
-void manager.start();
+// Подключение к Telegram откладываем: при деплое Railway новый контейнер стартует, пока старый ещё жив,
+// а один auth key у двух клиентов Telegram аннулирует (AUTH_KEY_DUPLICATED).
+const startTimer = setTimeout(() => void manager.start(), config.startDelayMs);
+logger.info("Подключение к Telegram начнётся после паузы", { delayMs: config.startDelayMs });
 
 let shuttingDown = false;
 async function shutdown(signal: string) {
@@ -36,7 +39,9 @@ async function shutdown(signal: string) {
   logger.info("Останавливаюсь", { signal });
   const force = setTimeout(() => process.exit(1), 10_000);
   force.unref();
+  clearTimeout(startTimer);
   server.close();
+  // stop() отключает клиент GramJS до выхода процесса
   await manager.stop().catch(() => undefined);
   await store.close().catch(() => undefined);
   process.exit(0);

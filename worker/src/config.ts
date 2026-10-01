@@ -13,6 +13,7 @@ const schema = z.object({
   INGEST_SECRET: required("INGEST_SECRET"),
   WORKER_SECRET: required("WORKER_SECRET"),
   PORT: z.coerce.number().int().min(1).max(65535).default(8787),
+  START_DELAY_MS: z.coerce.number().int().min(0).default(20_000),
 });
 
 export type Config = {
@@ -24,6 +25,8 @@ export type Config = {
   ingestSecret: string;
   workerSecret: string;
   port: number;
+  /** Пауза перед подключением к Telegram: старый контейнер при деплое должен успеть погаснуть. */
+  startDelayMs: number;
 };
 
 /** Бросает Error с перечнем всех проблемных переменных сразу. */
@@ -45,5 +48,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     ingestSecret: c.INGEST_SECRET,
     workerSecret: c.WORKER_SECRET,
     port: c.PORT,
+    startDelayMs: c.START_DELAY_MS,
   };
 }

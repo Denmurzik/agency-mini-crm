@@ -5,6 +5,7 @@
   },
   "deploy": {
     "startCommand": "npm start",
-    "healthcheckPath": "/health"
+    "healthcheckPath": "/health",
+    "overlapSeconds": 0
   }
 }

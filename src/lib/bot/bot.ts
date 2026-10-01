@@ -1,4 +1,4 @@
-import { eq, lt, sql } from "drizzle-orm";
+import { eq, lt, or, sql } from "drizzle-orm";
 import { Bot, type Context } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { getDb, type Db } from "@/lib/db";
@@ -31,13 +31,23 @@ export type CreateBotOptions = {
 
 // ── состояние диалога в БД ──────────────────────────────────────────────────
 
-async function loadSession(db: Db, chatId: number): Promise<{ state: FlowState; lastUpdateId: number }> {
+/**
+ * Telegram хранит недоставленные апдейты сутки, поэтому и «ретрай по update_id» имеет смысл только внутри суток.
+ * После долгого простоя Bot API выбирает следующий update_id случайно — он может оказаться меньше сохранённого.
+ */
+const RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+async function loadSession(
+  db: Db,
+  chatId: number,
+): Promise<{ state: FlowState; lastUpdateId: number; updatedAt: Date | null }> {
   const [row] = await db.select().from(botSessions).where(eq(botSessions.chatId, chatId)).limit(1);
-  if (!row) return { state: IDLE, lastUpdateId: 0 };
+  if (!row) return { state: IDLE, lastUpdateId: 0, updatedAt: null };
   const known = STEPS.includes(row.step as Step);
   return {
     state: known ? { step: row.step as Step, data: (row.data ?? {}) as FlowState["data"] } : IDLE,
     lastUpdateId: row.lastUpdateId,
+    updatedAt: row.updatedAt,
   };
 }
 
@@ -50,7 +60,11 @@ async function saveSession(db: Db, chatId: number, state: FlowState, updateId: n
       target: botSessions.chatId,
       set: { step: state.step, data: state.data, lastUpdateId: updateId, updatedAt: new Date() },
       // Монотонно: запоздавший параллельный апдейт не откатывает last_update_id назад.
-      setWhere: lt(botSessions.lastUpdateId, sql`excluded.last_update_id`),
+      // Строка старше суток — Telegram мог перенумеровать апдейты, перезаписываем безусловно.
+      setWhere: or(
+        lt(botSessions.lastUpdateId, sql`excluded.last_update_id`),
+        lt(botSessions.updatedAt, sql`now() - interval '24 hours'`),
+      ),
     });
 }
 
@@ -102,8 +116,9 @@ export function createBot({ token, db, botInfo, ingestOptions }: CreateBotOption
     if (chatId == null || !ctx.from) return;
     const updateId = ctx.update.update_id;
 
-    const { state, lastUpdateId } = await loadSession(db, chatId);
-    if (updateId <= lastUpdateId) return; // ретрай уже обработанного апдейта
+    const { state, lastUpdateId, updatedAt } = await loadSession(db, chatId);
+    const fresh = updatedAt != null && Date.now() - updatedAt.getTime() < RETRY_WINDOW_MS;
+    if (fresh && updateId <= lastUpdateId) return; // ретрай уже обработанного апдейта
 
     const result = step(state, input, profileOf(ctx));
 

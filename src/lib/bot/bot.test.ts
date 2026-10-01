@@ -243,6 +243,32 @@ describe("bot (grammY wiring, no network)", () => {
     });
   });
 
+  describe("update_id renumbering after a long silence", () => {
+    it("a stale session row (older than 24h) does not block an update with a smaller update_id", async () => {
+      await bot.handleUpdate(command("/start"));
+      await db.execute(sql`update bot_sessions set last_update_id = 9000000, updated_at = now() - interval '2 days'`);
+      const before = sent().length;
+
+      const next = command("/start");
+      Object.assign(next, { update_id: 42 });
+      await bot.handleUpdate(next);
+
+      expect(sent().length).toBe(before + 1);
+      const [row] = await db.select().from(botSessions);
+      expect(row).toMatchObject({ step: "service", lastUpdateId: 42 });
+    });
+
+    it("a fresh row still filters retries with a smaller update_id", async () => {
+      await bot.handleUpdate(command("/start"));
+      await db.execute(sql`update bot_sessions set last_update_id = 9000000`);
+      const before = sent().length;
+      const old = command("/start");
+      Object.assign(old, { update_id: 42 });
+      await bot.handleUpdate(old);
+      expect(sent().length).toBe(before);
+    });
+  });
+
   describe("retries and idempotency", () => {
     it("a redelivered update does not move the dialog or send anything twice", async () => {
       await bot.handleUpdate(command("/start"));
