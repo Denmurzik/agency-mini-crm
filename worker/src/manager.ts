@@ -55,6 +55,7 @@ export class AccountManager implements WorkerService {
   private pending: Pending | null = null;
   private timer: NodeJS.Timeout | null = null;
   private ticking = false;
+  private stopped = false;
   // Строка, сессию которой не удалось расшифровать: не долбим базу и лог каждые 30 с.
   private undecryptableId: number | null = null;
   private authQueue: Promise<unknown> = Promise.resolve();
@@ -70,6 +71,7 @@ export class AccountManager implements WorkerService {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.dropPending();
     const active = this.active;
@@ -84,8 +86,13 @@ export class AccountManager implements WorkerService {
     try {
       if (this.active) await this.ping(this.active);
       else {
-        const row = await this.deps.store.loadActivatable();
-        if (row && row.id !== this.undecryptableId) await this.activateFromRow(row);
+        // Активация идёт в той же очереди, что и вход: иначе heartbeat между остановкой старого
+        // клиента и записью нового аккаунта поднял бы старый и перезаписал active.
+        await this.serial(async () => {
+          if (this.active || this.stopped) return;
+          const row = await this.deps.store.loadActivatable();
+          if (row && row.id !== this.undecryptableId) await this.activateFromRow(row);
+        });
       }
     } catch (err) {
       this.deps.logger.error("Сбой heartbeat", { reason: errText(err) });
@@ -100,6 +107,8 @@ export class AccountManager implements WorkerService {
       // GramJS при обрыве может не бросить ошибку, а подвесить запрос: ограничиваем ожидание.
       await withTimeout(a.client.getMe(), PING_TIMEOUT_MS);
     } catch (err) {
+      // Пока шёл запрос, аккаунт могли заменить или отключить: чужого клиента не трогаем.
+      if (this.active !== a) return;
       if (isRevokedError(err)) return this.handleRevoked(a);
       a.failures++;
       logger.warn("Нет связи с Telegram", { failures: a.failures, reason: errText(err) });
@@ -110,6 +119,7 @@ export class AccountManager implements WorkerService {
       if (!a.client.isConnected()) await a.client.connect().catch(() => undefined);
       return;
     }
+    if (this.active !== a) return;
     const hadFailures = a.failures > 0;
     a.failures = 0;
     if (a.degraded) {
@@ -145,11 +155,13 @@ export class AccountManager implements WorkerService {
     try {
       await client.connect();
       const me = await client.getMe();
-      this.activate(row.id, me.id, client);
       if (row.status !== "connected") await store.setStatus(row.id, "connected");
       await store.heartbeat(row.id);
+      // Публикуем active только после полной инициализации: при сбое выше ничего не остаётся
+      // в памяти, и следующий тик повторит активацию.
+      const active = this.activate(row.id, me.id, client);
       logger.info("Аккаунт подключён, слушаю личные сообщения");
-      if (this.active) void this.catchUp(this.active);
+      void this.catchUp(active);
     } catch (err) {
       await client.disconnect().catch(() => undefined);
       if (isRevokedError(err)) {
@@ -162,9 +174,11 @@ export class AccountManager implements WorkerService {
     }
   }
 
-  private activate(id: number, selfId: number, client: TgClient): void {
-    this.active = { id, selfId, client, failures: 0, degraded: false };
+  private activate(id: number, selfId: number, client: TgClient): Active {
+    const active: Active = { id, selfId, client, failures: 0, degraded: false };
+    this.active = active;
     client.listen((msg) => this.onMessage(msg, selfId));
+    return active;
   }
 
   // ---- входящие ----

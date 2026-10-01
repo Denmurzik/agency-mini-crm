@@ -22,6 +22,9 @@ async function main() {
   await api.setWebhook(url, {
     secret_token: secret,
     allowed_updates: ["message", "callback_query"],
+    // Компромисс MVP: Telegram доставляет апдейты строго по одному, поэтому диалог одного чата
+    // не обрабатывается параллельно (состояние в bot_sessions читается и пишется без блокировок).
+    max_connections: 1,
     drop_pending_updates: true,
   });
   console.log(`Webhook установлен: ${url}`);

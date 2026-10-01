@@ -53,6 +53,8 @@ function LeadSheetBody({ leadId, summary, allTags, onClose, onChanged }: Omit<Pr
   // base — последние значения с сервера: в состоянии для рендера, в ref для асинхронных обработчиков.
   const [base, setBase] = useState<Form | null>(null);
   const baseRef = useRef<Form | null>(null);
+  // Поллинг и перезагрузка после мутации могут обгонять друг друга: применяем только ответ на последний запрос.
+  const requestSeq = useRef(0);
   const [saving, setSaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -61,12 +63,15 @@ function LeadSheetBody({ leadId, summary, allTags, onClose, onChanged }: Omit<Pr
   const activity = summary?.lastActivityAt;
 
   const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       const res = await fetch(`/api/leads/${leadId}`, { cache: "no-store" });
+      if (seq !== requestSeq.current) return;
       if (res.status === 404) return setState("missing");
       if (res.status === 401) return router.replace("/login");
       if (!res.ok) return setState((s) => (s === "ready" ? s : "error"));
       const data: LeadDetailDTO = await res.json();
+      if (seq !== requestSeq.current) return;
       setDetail(data);
       setState("ready");
       // Не затираем то, что менеджер сейчас печатает: обновляем форму, только если она не менялась.
@@ -111,6 +116,7 @@ function LeadSheetBody({ leadId, summary, allTags, onClose, onChanged }: Omit<Pr
   async function changeStatus(status: LeadStatus) {
     if (!detail) return;
     const previous = detail;
+    requestSeq.current++; // запрос, начатый до правки, уже устарел
     setDetail({ ...detail, lead: { ...detail.lead, status } });
     try {
       const res = await updateLeadAction(leadId, { status });
@@ -136,6 +142,7 @@ function LeadSheetBody({ leadId, summary, allTags, onClose, onChanged }: Omit<Pr
   async function removeTag(tag: TagDTO) {
     if (!detail) return;
     const previous = detail;
+    requestSeq.current++;
     setDetail({ ...detail, lead: { ...detail.lead, tags: detail.lead.tags.filter((t) => t.id !== tag.id) } });
     try {
       const res = await removeTagAction(leadId, tag.id);

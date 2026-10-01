@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildIngestPayload,
   messageText,
+  pickUnread,
   senderContact,
   senderName,
   shouldIngest,
@@ -116,5 +117,29 @@ describe("buildIngestPayload", () => {
   });
   it("бросает ошибку без отправителя", () => {
     expect(() => buildIngestPayload(msg({ sender: null }), SELF)).toThrow();
+  });
+});
+
+describe("pickUnread", () => {
+  const m = (id: number, out = false, date = 1000) => ({ id, out, date });
+
+  it("находит входящее непрочитанное, даже если после него стоит наш ответ", () => {
+    // новые сначала, как отдаёт getMessages: ответ (12), непрочитанное входящее (11), прочитанное (10)
+    const res = pickUnread([m(12, true), m(11), m(10)], { readInboxMaxId: 10, minDate: 0, limit: 20 });
+    expect(res.map((x) => x.id)).toEqual([11]);
+  });
+
+  it("отдаёт старые сначала и режет до limit новейшими", () => {
+    const res = pickUnread([m(5), m(4), m(3), m(2)], { readInboxMaxId: 0, minDate: 0, limit: 2 });
+    expect(res.map((x) => x.id)).toEqual([4, 5]);
+  });
+
+  it("отбрасывает старше minDate и исходящие", () => {
+    const res = pickUnread([m(3, false, 100), m(2, true, 2000), m(1, false, 2000)], {
+      readInboxMaxId: 0,
+      minDate: 1000,
+      limit: 20,
+    });
+    expect(res.map((x) => x.id)).toEqual([1]);
   });
 });

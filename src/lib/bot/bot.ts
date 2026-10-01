@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, lt, sql } from "drizzle-orm";
 import { Bot, type Context } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
 import { getDb, type Db } from "@/lib/db";
@@ -49,6 +49,8 @@ async function saveSession(db: Db, chatId: number, state: FlowState, updateId: n
     .onConflictDoUpdate({
       target: botSessions.chatId,
       set: { step: state.step, data: state.data, lastUpdateId: updateId, updatedAt: new Date() },
+      // Монотонно: запоздавший параллельный апдейт не откатывает last_update_id назад.
+      setWhere: lt(botSessions.lastUpdateId, sql`excluded.last_update_id`),
     });
 }
 
@@ -116,6 +118,15 @@ export function createBot({ token, db, botInfo, ingestOptions }: CreateBotOption
 
     const replies = result.effect ? await runEffect(result.effect, ctx, result.replies) : result.replies;
     await saveSession(db, chatId, result.state, updateId);
+
+    // Нажатая кнопка своё отработала: убираем клавиатуру, чтобы старое сообщение не вводило в заблуждение.
+    if (input.type === "callback" && !result.callbackAnswer) {
+      try {
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+      } catch (err) {
+        console.warn("[bot] editMessageReplyMarkup failed", err);
+      }
+    }
 
     try {
       await sendReplies(ctx, replies);

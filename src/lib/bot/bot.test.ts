@@ -85,10 +85,10 @@ describe("bot (grammY wiring, no network)", () => {
     await fillDialog();
     expect(lastSent().text).toContain("Услуга: SMM");
     expect(lastSent().text).toContain("Нажимая «Отправить»");
-    expect(lastSent().reply_markup.inline_keyboard[0].map((b) => b.callback_data)).toEqual(["submit", "restart"]);
+    expect(lastSent().reply_markup.inline_keyboard[0].map((b) => b.callback_data)).toEqual(["submit:1", "restart:1"]);
     expect(await db.select().from(leads)).toHaveLength(0);
 
-    await bot.handleUpdate(callback("submit", 777));
+    await bot.handleUpdate(callback("submit:1", 777));
 
     const [lead] = await db.select().from(leads);
     expect(lead).toMatchObject({
@@ -142,7 +142,7 @@ describe("bot (grammY wiring, no network)", () => {
 
   it("a double click on «Отправить» and a redelivered update produce a single lead", async () => {
     await fillDialog();
-    const submit = callback("submit", 777);
+    const submit = callback("submit:1", 777);
     await bot.handleUpdate(submit);
     await bot.handleUpdate(submit);
     expect(await db.select().from(leads)).toHaveLength(1);
@@ -151,9 +151,9 @@ describe("bot (grammY wiring, no network)", () => {
 
   it("the same person writing again later is merged into the same lead", async () => {
     await fillDialog();
-    await bot.handleUpdate(callback("submit", 777));
+    await bot.handleUpdate(callback("submit:1", 777));
     await fillDialog();
-    await bot.handleUpdate(callback("submit", 888));
+    await bot.handleUpdate(callback("submit:2", 888));
     expect(await db.select().from(leads)).toHaveLength(1);
     expect(await db.select().from(messages)).toHaveLength(2);
   });
@@ -199,6 +199,50 @@ describe("bot (grammY wiring, no network)", () => {
     expect(calls).toHaveLength(0);
   });
 
+  describe("drafts and concurrency", () => {
+    it("«Отправить» under an old draft's message is stale and does not swallow the new application", async () => {
+      await fillDialog();
+      await bot.handleUpdate(callback("submit:1", 777));
+      await fillDialog();
+      // нажатие под СТАРЫМ сообщением (message_id 777) при новом черновике на шаге подтверждения
+      await bot.handleUpdate(callback("submit:1", 777));
+      expect(calls.filter((c) => c.method === "answerCallbackQuery").at(-1)?.payload).toMatchObject({
+        text: "Эта кнопка уже неактуальна",
+      });
+      expect((await db.select().from(botSessions))[0].step).toBe("confirm");
+      expect(await db.select().from(messages)).toHaveLength(1);
+
+      await bot.handleUpdate(callback("submit:2", 888));
+      expect(await db.select().from(messages)).toHaveLength(2);
+      expect(lastSent().text).toContain("принята");
+    });
+
+    it("removes the inline keyboard from the message whose button was handled, but not for stale buttons", async () => {
+      await fillDialog();
+      const edits = () => calls.filter((c) => c.method === "editMessageReplyMarkup");
+      const before = edits().length; // выбор услуги в fillDialog тоже убирает кнопки
+      await bot.handleUpdate(callback("submit:1", 777));
+      expect(edits()).toHaveLength(before + 1);
+      expect(edits().at(-1)?.payload).toMatchObject({ message_id: 777, reply_markup: { inline_keyboard: [] } });
+
+      await bot.handleUpdate(callback("submit:1", 777)); // уже устарела
+      expect(edits()).toHaveLength(before + 1);
+    });
+
+    it("the session upsert is monotonic: a late update does not roll last_update_id back", async () => {
+      await bot.handleUpdate(command("/start"));
+      const [{ lastUpdateId }] = await db.select().from(botSessions);
+      // имитируем запоздавший параллельный апдейт, который прочитал старую сессию
+      await db.execute(sql`update bot_sessions set last_update_id = ${lastUpdateId + 50}`);
+      const late = callback("svc:site");
+      Object.assign(late, { update_id: lastUpdateId + 10 });
+      await bot.handleUpdate(late); // пропущен как «уже обработанный»
+      const [row] = await db.select().from(botSessions);
+      expect(row.lastUpdateId).toBe(lastUpdateId + 50);
+      expect(row.step).toBe("service");
+    });
+  });
+
   describe("retries and idempotency", () => {
     it("a redelivered update does not move the dialog or send anything twice", async () => {
       await bot.handleUpdate(command("/start"));
@@ -223,7 +267,7 @@ describe("bot (grammY wiring, no network)", () => {
 
     it("a redelivered submit creates a single lead", async () => {
       await fillDialog();
-      const submit = callback("submit", 777);
+      const submit = callback("submit:1", 777);
       await bot.handleUpdate(submit);
       const before = calls.length;
       await bot.handleUpdate(submit);
@@ -233,7 +277,7 @@ describe("bot (grammY wiring, no network)", () => {
 
     it("a failure before the commit is thrown (-> 500) and the retry of the same update succeeds", async () => {
       await fillDialog();
-      const submit = callback("submit", 777);
+      const submit = callback("submit:1", 777);
       await db.execute(sql`alter table leads rename to leads_broken`);
       await expect(bot.handleUpdate(submit)).rejects.toThrow();
       expect((await db.select().from(botSessions))[0].step).toBe("confirm");

@@ -1,4 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "@/lib/db";
 import { leads, leadTags, messages, tags, type Lead, type LeadSource, type LeadStatus } from "@/lib/db/schema";
 import { notifyLead } from "@/lib/notify";
@@ -124,15 +125,17 @@ async function write(tx: Db, input: IngestInput): Promise<WriteOutcome> {
   }
 
   if (!created) {
-    // Имя не трогаем: менеджер мог его поправить. Дозаполняем только пустое.
-    const reopen = lead.status === "won" || lead.status === "lost";
+    // Имя не трогаем: менеджер мог его поправить. Дозаполняем только пустое — и считаем это в самом UPDATE
+    // по текущим значениям колонок, чтобы не затереть правку, сделанную в UI между нашим select и update.
+    const fillIfEmpty = (col: AnyPgColumn, value: string | null) =>
+      sql`case when ${col} is null or btrim(${col}) = '' then coalesce(${value}::text, ${col}) else ${col} end`;
     [lead] = await tx
       .update(leads)
       .set({
-        contact: isEmpty(lead.contact) ? contact : lead.contact,
-        request: isEmpty(lead.request) ? request : lead.request,
-        tgUsername: isEmpty(lead.tgUsername) ? tgUsername : lead.tgUsername,
-        status: reopen ? "new" : lead.status,
+        contact: fillIfEmpty(leads.contact, contact),
+        request: fillIfEmpty(leads.request, request),
+        tgUsername: fillIfEmpty(leads.tgUsername, tgUsername),
+        status: sql`case when ${leads.status} in ('won', 'lost') then 'new'::lead_status else ${leads.status} end`,
         updatedAt: sql`now()`,
         lastActivityAt: sql`now()`,
       })

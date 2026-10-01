@@ -110,6 +110,17 @@ describe("ingestLead", () => {
     expect(lead).toMatchObject({ name: "А", contact: "+7999", request: "первый", tgUsername: "a" });
   });
 
+  it("fills a whitespace-only contact but keeps a manager's edit", async () => {
+    const first = await ingestLead(db, { source: "bot", name: "А", contact: "  ", tgUserId: 10 });
+    expect(first.lead.contact).toBeNull();
+    await db.update(leads).set({ contact: " " }).where(eq(leads.id, first.lead.id));
+    const filled = await ingestLead(db, { source: "telegram", name: "А", contact: "@a_user", tgUserId: 10 });
+    expect(filled.lead.contact).toBe("@a_user");
+    await db.update(leads).set({ contact: "+7 999 править", status: "in_progress" }).where(eq(leads.id, first.lead.id));
+    const kept = await ingestLead(db, { source: "telegram", name: "А", contact: "@other", tgUserId: 10 });
+    expect(kept.lead).toMatchObject({ contact: "+7 999 править", status: "in_progress" });
+  });
+
   it("bumps updatedAt and lastActivityAt on a repeat contact", async () => {
     const { lead: first } = await ingestLead(db, { source: "bot", name: "А", tgUserId: 9 });
     await new Promise((r) => setTimeout(r, 15));

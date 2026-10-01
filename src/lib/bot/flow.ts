@@ -15,6 +15,8 @@ export type Draft = {
   name?: string;
   contact?: string;
   request?: string;
+  /** Номер черновика: растёт с каждым стартом диалога. Кнопки подтверждения старого черновика устаревают. */
+  draft?: number;
 };
 
 export type FlowState = { step: Step; data: Draft };
@@ -56,7 +58,11 @@ export type StepResult = {
 
 export const IDLE: FlowState = { step: "idle", data: {} };
 
-export const CB = { service: "svc:", submit: "submit", restart: "restart" } as const;
+export const CB = {
+  service: "svc:",
+  submit: (draft: number) => `submit:${draft}`,
+  restart: (draft: number) => `restart:${draft}`,
+} as const;
 export const BTN_TG_CONTACT = "✈️ Пишите сюда, в Telegram";
 export const BTN_SHARE_PHONE = "📱 Поделиться номером";
 export const STALE_BUTTON = "Эта кнопка уже неактуальна";
@@ -77,17 +83,17 @@ export function step(state: FlowState, input: FlowInput, profile: Profile, deps:
     const payload = input.payload?.trim();
     if (payload?.startsWith("notify_") && verifyToken(payload.slice("notify_".length))) {
       return {
-        state: IDLE,
+        state: idleFrom(state),
         replies: [{ text: "Готово, буду присылать уведомления о новых лидах 🔔", keyboard: { kind: "remove" } }],
         effect: { type: "subscribe" },
       };
     }
-    return begin();
+    return begin(state);
   }
 
   if (input.type === "cancel") {
     return {
-      state: IDLE,
+      state: idleFrom(state),
       replies: [{ text: "Заявка отменена. Чтобы начать заново, нажмите /start.", keyboard: { kind: "remove" } }],
     };
   }
@@ -133,9 +139,12 @@ export function summary(d: SubmitDraft): string {
 
 // ── шаги ─────────────────────────────────────────────────────────────────────
 
-function begin(): StepResult {
+const draftNo = (state: FlowState) => state.data.draft ?? 0;
+const idleFrom = (state: FlowState): FlowState => ({ step: "idle", data: { draft: draftNo(state) } });
+
+function begin(state: FlowState): StepResult {
   return {
-    state: { step: "service", data: {} },
+    state: { step: "service", data: { draft: draftNo(state) + 1 } },
     replies: [
       {
         text: "Здравствуйте! Помогу оставить заявку в агентство — это займёт минуту.\n\nЧто вас интересует?",
@@ -152,18 +161,17 @@ function onCallback(state: FlowState, data: string, profile: Profile): StepResul
     const service = SERVICES.find((s) => s.key === data.slice(CB.service.length));
     if (!service) return stale;
     return {
-      state: { step: "name", data: { service: service.tag } },
+      state: { step: "name", data: { ...state.data, service: service.tag } },
       replies: [{ text: `${service.label} — отлично! Как к вам обращаться?`, keyboard: nameKeyboard(profile) }],
     };
   }
 
-  if (state.step === "confirm" && data === CB.submit) {
-    const draft = toDraft(state);
-    return { state: IDLE, replies: [], effect: { type: "submit", draft } };
+  if (state.step === "confirm" && data === CB.submit(draftNo(state))) {
+    return { state: idleFrom(state), replies: [], effect: { type: "submit", draft: toDraft(state) } };
   }
 
-  if (state.step === "confirm" && data === CB.restart) {
-    return begin();
+  if (state.step === "confirm" && data === CB.restart(draftNo(state))) {
+    return begin(state);
   }
 
   return stale;
@@ -227,7 +235,7 @@ function onRequest(state: FlowState, input: FlowInput): StepResult {
 function confirmReply(state: FlowState): StepResult {
   return {
     state,
-    replies: [{ text: `${summary(toDraft(state))}\n\n${noticeConsent}`, keyboard: confirmKeyboard() }],
+    replies: [{ text: `${summary(toDraft(state))}\n\n${noticeConsent}`, keyboard: confirmKeyboard(draftNo(state)) }],
   };
 }
 
@@ -261,13 +269,13 @@ function contactKeyboard(profile: Profile): Keyboard {
   return { kind: "reply", rows, placeholder: "Телефон, email или @username" };
 }
 
-function confirmKeyboard(): Keyboard {
+function confirmKeyboard(draft: number): Keyboard {
   return {
     kind: "inline",
     rows: [
       [
-        { text: "✅ Отправить", data: CB.submit },
-        { text: "✏️ Заполнить заново", data: CB.restart },
+        { text: "✅ Отправить", data: CB.submit(draft) },
+        { text: "✏️ Заполнить заново", data: CB.restart(draft) },
       ],
     ],
   };

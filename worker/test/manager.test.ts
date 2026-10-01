@@ -230,6 +230,34 @@ describe("вход в аккаунт", () => {
     expect(clients[1]!.connected).toBe(true);
   });
 
+  it("heartbeat во время замены аккаунта не поднимает старого и не перезаписывает active", async () => {
+    const { manager, clients, store } = setup();
+    await manager.sendCode("+79991112233");
+    await manager.signIn("11111");
+    await manager.sendCode("+79994445566");
+
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const original = store.replaceAccount.bind(store);
+    vi.spyOn(store, "replaceAccount").mockImplementation(async (a) => {
+      await gate;
+      return original(a);
+    });
+
+    const signIn = manager.signIn("22222");
+    await vi.waitFor(() => expect(clients[0]!.connected).toBe(false)); // старый клиент уже остановлен
+    const tick = manager.tick(); // heartbeat ровно в окне между остановкой и записью
+    release();
+    await signIn;
+    await tick;
+
+    expect(clients).toHaveLength(2); // старый аккаунт не поднимали
+    expect(clients[1]!.connected).toBe(true);
+    await manager.logout();
+    expect(clients[1]!.loggedOut).toBe(true); // logout отработал на новом клиенте
+    expect(clients[0]!.loggedOut).toBe(false);
+  });
+
   it("logout: отзывает авторизацию в Telegram, строка остаётся без сессии", async () => {
     const { manager, clients, store } = setup();
     await manager.sendCode("+79991112233");
@@ -319,6 +347,21 @@ describe("живучесть", () => {
     await manager.stop();
     spy.mockRestore();
     expect(store.heartbeats).toBe(2);
+  });
+
+  it("сбой инициализации после getMe не оставляет active: следующий тик повторяет активацию", async () => {
+    const { manager, store, clients } = setup();
+    seed(store, { status: "error" });
+    vi.spyOn(store, "setStatus").mockRejectedValueOnce(new Error("db down"));
+    await manager.start();
+    expect(clients[0]!.handler).toBeNull(); // слушатель не повешен
+    expect(clients[0]!.connected).toBe(false);
+
+    await manager.tick();
+    expect(clients).toHaveLength(2);
+    expect(clients[1]!.handler).toBeTypeOf("function");
+    expect(store.rows[0]!.status).toBe("connected");
+    await manager.stop();
   });
 
   it("на тике обновляет last_seen_at", async () => {

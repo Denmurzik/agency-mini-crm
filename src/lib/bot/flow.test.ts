@@ -54,7 +54,7 @@ describe("flow: happy path", () => {
 
   it("choosing a service stores it as a tag and asks for the name with the profile name button", () => {
     const r = walk(toName);
-    expect(r.state).toEqual({ step: "name", data: { service: "Сайт" } });
+    expect(r.state).toEqual({ step: "name", data: { draft: 1, service: "Сайт" } });
     expect(replyTexts(kb(r))).toEqual(["Иван Петров"]);
   });
 
@@ -88,21 +88,21 @@ describe("flow: happy path", () => {
     expect(t).toContain("Контакт: +79991234567");
     expect(t).toContain("Запрос: Нужен лендинг для кофейни");
     expect(t).toContain("Нажимая «Отправить», вы соглашаетесь на обработку персональных данных.");
-    expect(inlineData(kb(r))).toEqual(["submit", "restart"]);
+    expect(inlineData(kb(r))).toEqual(["submit:1", "restart:1"]);
   });
 
   it("submit emits the submit effect and resets the state", () => {
-    const r = walk([...toConfirm, { type: "callback", data: "submit" }]);
-    expect(r.state).toEqual(IDLE);
+    const r = walk([...toConfirm, { type: "callback", data: "submit:1" }]);
+    expect(r.state).toEqual({ step: "idle", data: { draft: 1 } });
     expect(r.effect).toEqual({
       type: "submit",
       draft: { service: "Сайт", name: "Иван", contact: "+79991234567", request: "Нужен лендинг для кофейни" },
     });
   });
 
-  it("restart goes back to service selection with empty data", () => {
-    const r = walk([...toConfirm, { type: "callback", data: "restart" }]);
-    expect(r.state).toEqual({ step: "service", data: {} });
+  it("restart goes back to service selection with a new draft number and no collected data", () => {
+    const r = walk([...toConfirm, { type: "callback", data: "restart:1" }]);
+    expect(r.state).toEqual({ step: "service", data: { draft: 2 } });
     expect(inlineData(kb(r))).toContain("svc:smm");
   });
 
@@ -260,7 +260,7 @@ describe("flow: confirm step", () => {
     for (const input of [{ type: "text", text: "а можно?" }, { type: "other" }] as FlowInput[]) {
       const r = run(atConfirm(), input);
       expect(r.state).toEqual(atConfirm());
-      expect(inlineData(kb(r))).toEqual(["submit", "restart"]);
+      expect(inlineData(kb(r))).toEqual(["submit:1", "restart:1"]);
       expect(texts(r)).toContain("Нужен лендинг для кофейни");
     }
   });
@@ -270,7 +270,8 @@ describe("flow: edges", () => {
   it("/cancel resets from any step and removes the keyboard", () => {
     for (const inputs of [toService, toName, toContact, toRequest, toConfirm]) {
       const r = walk([...inputs, { type: "cancel" }]);
-      expect(r.state).toEqual(IDLE);
+      expect(r.state.step).toBe("idle");
+      expect(r.state.data).toEqual({ draft: r.state.data.draft });
       expect(kb(r)).toEqual({ kind: "remove" });
       expect(texts(r)).toContain("отменена");
       expect(r.effect).toBeUndefined();
@@ -278,13 +279,13 @@ describe("flow: edges", () => {
   });
 
   it("/cancel at idle is harmless", () => {
-    expect(run(IDLE, { type: "cancel" }).state).toEqual(IDLE);
+    expect(run(IDLE, { type: "cancel" }).state.step).toBe("idle");
   });
 
   it("repeated /start mid-dialog starts over and drops collected data", () => {
     for (const inputs of [toName, toContact, toRequest, toConfirm]) {
       const r = walk([...inputs, { type: "start" }]);
-      expect(r.state).toEqual({ step: "service", data: {} });
+      expect(r.state).toEqual({ step: "service", data: { draft: 2 } });
       expect(inlineData(kb(r))).toContain("svc:site");
     }
   });
@@ -327,9 +328,22 @@ describe("flow: edges", () => {
     }
   });
 
+  it("buttons of an older draft are stale even when the new draft is at the confirm step", () => {
+    // 1-й черновик отправлен, 2-й дошёл до подтверждения; жмём кнопки под сообщением 1-го.
+    const second = walk([...toConfirm, { type: "callback", data: "submit:1" }, ...toConfirm]);
+    expect(second.state.data.draft).toBe(2);
+    for (const data of ["submit:1", "restart:1", "submit", "submit:3"]) {
+      const r = run(second.state, { type: "callback", data });
+      expect(r.callbackAnswer).toBe(STALE_BUTTON);
+      expect(r.effect).toBeUndefined();
+      expect(r.state).toEqual(second.state);
+    }
+    expect(run(second.state, { type: "callback", data: "submit:2" }).effect?.type).toBe("submit");
+  });
+
   it("a second 'submit' press after submitting is stale", () => {
-    const first = walk([...toConfirm, { type: "callback", data: "submit" }]);
-    const second = run(first.state, { type: "callback", data: "submit" });
+    const first = walk([...toConfirm, { type: "callback", data: "submit:1" }]);
+    const second = run(first.state, { type: "callback", data: "submit:1" });
     expect(second.callbackAnswer).toBe(STALE_BUTTON);
     expect(second.effect).toBeUndefined();
   });
@@ -350,14 +364,14 @@ describe("flow: notification subscription", () => {
   it("a valid notify token subscribes and confirms", () => {
     const r = run(IDLE, { type: "start", payload: "notify_good" });
     expect(r.effect).toEqual({ type: "subscribe" });
-    expect(r.state).toEqual(IDLE);
+    expect(r.state.step).toBe("idle");
     expect(texts(r)).toBe("Готово, буду присылать уведомления о новых лидах 🔔");
   });
 
   it("a valid token works in the middle of a dialog and resets it", () => {
     const r = walk([...toContact, { type: "start", payload: "notify_good" }]);
     expect(r.effect).toEqual({ type: "subscribe" });
-    expect(r.state).toEqual(IDLE);
+    expect(r.state).toEqual({ step: "idle", data: { draft: 1 } });
   });
 
   it("an invalid token falls back to the normal start", () => {

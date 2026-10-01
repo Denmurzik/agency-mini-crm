@@ -3,7 +3,7 @@ import { StringSession } from "telegram/sessions/index.js";
 import { NewMessage, type NewMessageEvent } from "telegram/events/index.js";
 import { computeCheck } from "telegram/Password.js";
 import { LogLevel, Logger as GramLogger } from "telegram/extensions/Logger.js";
-import type { IncomingMessage, MediaKind } from "./filter.js";
+import { pickUnread, type IncomingMessage, type MediaKind } from "./filter.js";
 import { errText, type Logger } from "./log.js";
 import { createSenderResolver } from "./sender.js";
 
@@ -142,12 +142,15 @@ export function createGramClientFactory(apiId: number, apiHash: string, log: Log
         const result: IncomingMessage[] = [];
         for (const d of await client.getDialogs({ limit: dialogs })) {
           if (!d.isUser || !d.unreadCount || !(d.entity instanceof Api.User)) continue;
-          // unreadCount считает только входящие, но среди последних сообщений могут быть и наши ответы.
-          const msgs = await client.getMessages(d.entity, { limit: Math.min(d.unreadCount, perDialog) });
+          // После непрочитанного входящего может идти наш ответ, поэтому история берётся с запасом.
+          const history = await client.getMessages(d.entity, { limit: Math.min(d.unreadCount + 20, 50) });
           const sender = toSender(d.entity);
-          for (const m of [...msgs].reverse()) {
-            if (!m.out && m.date >= minDate) result.push(toIncoming(m, sender));
-          }
+          const unread = pickUnread<Api.Message>([...history], {
+            readInboxMaxId: d.dialog.readInboxMaxId,
+            minDate,
+            limit: perDialog,
+          });
+          for (const m of unread) result.push(toIncoming(m, sender));
         }
         return result;
       },

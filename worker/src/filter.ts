@@ -37,6 +37,20 @@ export type IngestPayload = {
   message: { text: string; externalId: string };
 };
 
+/**
+ * Выбор непрочитанных входящих для догонялки. История берётся с запасом, потому что среди
+ * последних сообщений могут быть наши ответы: выбираем по readInboxMaxId, а не по счётчику.
+ */
+export function pickUnread<M extends { id: number; out?: boolean; date: number }>(
+  history: M[],
+  opts: { readInboxMaxId: number; minDate: number; limit: number },
+): M[] {
+  return history
+    .filter((m) => !m.out && m.id > opts.readInboxMaxId && m.date >= opts.minDate)
+    .sort((a, b) => a.id - b.id)
+    .slice(-opts.limit);
+}
+
 export function shouldIngest(m: IncomingMessage, selfId: number): boolean {
   if (m.out || !m.isPrivate) return false;
   const s = m.sender;
